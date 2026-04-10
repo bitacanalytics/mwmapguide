@@ -1,0 +1,1 @@
+Sitemap: https://bitacanalytics.github.io/mwmapguide/sitemap.xml
