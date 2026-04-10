@@ -1,0 +1,1502 @@
+---
+title: "mwmap: A Complete Guide to Mapping Malawi in R"
+subtitle: "Creating Publication-Ready Maps with Administrative Boundary Data"
+author: "Chifundo Bita"
+date: today
+date-format: "MMMM D, YYYY"
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    toc-location: left
+    number-sections: true
+    number-depth: 3
+    code-fold: false
+    code-tools: true
+    code-copy: true
+    highlight-style: github
+    fig-align: center
+    fig-width: 7
+    fig-height: 5
+    df-print: kable
+    smooth-scroll: true
+    anchor-sections: true
+    embed-resources: true
+    css: |
+      body {
+        font-family: 'Source Sans Pro', Georgia, sans-serif;
+        font-size: 16px;
+        line-height: 1.8;
+        color: #2c2c2c;
+      }
+      p { margin-bottom: 1.1em; }
+      .callout { margin: 1.5em 0; }
+      .callout-note    { border-left-color: #1a5a9a; }
+      .callout-tip     { border-left-color: #238443; }
+      .callout-warning { border-left-color: #e6550d; }
+      h1, h2, h3, h4 { color: #1a3a5c; font-weight: 600; margin-top: 1.8em; }
+      h1 { font-size: 2em; border-bottom: 3px solid #1a5a9a; padding-bottom: 0.3em; }
+      h2 { font-size: 1.5em; border-bottom: 1px solid #dce6f0; padding-bottom: 0.2em; }
+      code { color: #c0392b; background: #fdf6f6; padding: 1px 4px; border-radius: 3px; }
+      pre  { background: #f8f8f8; border-left: 4px solid #1a5a9a; border-radius: 4px; }
+      table { font-size: 0.93em; }
+      thead { background: #eaf2fb; }
+      .lead {
+        font-size: 1.12em;
+        color: #34495e;
+        line-height: 1.9;
+        margin-bottom: 1.4em;
+      }
+
+execute:
+  echo: true
+  warning: false
+  message: false
+  eval: true
+
+knitr:
+  opts_chunk:
+    comment: "#>"
+    collapse: true
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(mwmap)
+library(ggplot2)
+library(dplyr)
+library(readr)
+```
+
+# Introduction {.unnumbered}
+
+::: {.lead}
+**mwmap** is an R package that makes it easy to create accurate, professional
+maps of Malawi using nothing more than a few lines of R code. It bundles
+pre-processed spatial boundary data for every administrative level in the
+country — from the national border down to individual Traditional Authorities —
+and wraps that data in a family of functions that handle the tedious parts of
+GIS work for you: joining your spreadsheet data to map geometries, normalising
+inconsistent district name spellings, choosing colour scales, and producing
+figures that are ready to drop straight into a report or publication.
+:::
+
+The package is built on top of **ggplot2** and **sf**, the two most widely used
+R packages for data visualisation and spatial analysis respectively. If you
+already know ggplot2, you will feel immediately at home — every mwmap function
+returns a ggplot2 object, so you can add layers, themes, and scales using the
+familiar `+` operator.
+
+You do not need to be a GIS expert to use mwmap. You do not need to download
+shapefiles, reproject coordinate systems, or understand spatial data formats.
+All of that is handled internally. What you bring is your district-level data —
+disease counts, survey estimates, economic indicators — and mwmap handles the
+cartographic heavy lifting.
+
+::: {.callout-note}
+## Installation
+
+**mwmap** is available on CRAN and can be installed in the usual way:
+
+```r
+# Stable release from CRAN
+install.packages("mwmap")
+
+# Latest development version from GitHub
+# install.packages("remotes")
+remotes::install_github("bitacanalytics/mwmap")
+```
+
+Once installed, load it alongside ggplot2:
+
+```r
+library(mwmap)
+library(ggplot2)
+```
+:::
+
+## What is in the package?
+
+mwmap is organised into five functional groups. Understanding this structure
+helps you find the right function quickly.
+
+**Core mapping functions** produce the base map canvas. You will almost always
+start with one of these before adding any data layers on top.
+
+**Data and joining functions** are the bridge between your spreadsheet and the
+map geometry. They handle the spatial join, clean up district names, and report
+on how well your data matched the shapefile.
+
+**Layer functions** add elements on top of an existing base map — highlighted
+districts, point locations, text labels. These are designed to be chained
+together using `+`.
+
+**Styling functions** control colour scales and overall layout. The built-in
+palettes have been chosen to work well for the most common Malawi mapping
+use cases (health, agriculture, poverty, administration).
+
+**Utility functions** are helpers you will use indirectly but that are also
+useful on their own — particularly for cleaning district name columns before a
+join.
+
+| Category | Functions |
+|---|---|
+| **Core mapping** | `mw_map()`, `mw_regions()`, `mw_ta_map()` |
+| **Data & joining** | `mw_join()`, `mw_choropleth()`, `mw_districts()`, `mw_districts_simple()` |
+| **Map layers** | `mw_highlight()`, `mw_highlight_multi()`, `mw_points()`, `mw_labels()`, `mw_label_repel()` |
+| **Styling** | `mw_layout()`, `scale_fill_mw()`, `get_mw_palette()`, `get_mw_palettes()`, `view_mw_palettes()` |
+| **Utilities** | `mw_clean_names()`, `mw_suggest_matches()` |
+
+: mwmap function groups {tbl-colwidths="[30,70]"}
+
+The package also ships five **built-in spatial datasets**. These are `sf`
+objects — essentially data frames where one column contains polygon geometry —
+sourced from the Malawi Spatial Data Platform (MASDAP) and pre-processed for
+use in R.
+
+| Dataset | Description | Polygons |
+|---|---|---|
+| `mw_level_0` | National boundary of Malawi | 1 |
+| `mw_level_1` | The three administrative regions | 3 |
+| `mw_level_2` | All 28 districts | 28 |
+| `mw_level_3` | Traditional Authorities (sub-district) | ~250 |
+| `major_lakes` | Lake Malawi, Lake Malombe, Lake Chilwa | 3 |
+
+: Spatial datasets bundled in mwmap {tbl-colwidths="[22,55,23]"}
+
+You can use these datasets directly in your own `sf` or `ggplot2` code, but in
+most cases the mwmap functions will load them automatically for you.
+
+---
+
+# Getting Started
+
+## Your first map
+
+The fastest way to get started is to call `mw_map()` with no arguments. This
+produces a clean, grey district-level outline of Malawi in a single line of
+code.
+
+```{r}
+#| label: fig-first-map
+#| fig-cap: "A minimal Malawi map produced by mw_map() with no arguments."
+library(mwmap)
+library(ggplot2)
+
+mw_map()
+```
+
+What you get back is a standard **ggplot2 object** — the same kind of object
+you get from calling `ggplot()`. This is important because it means you can
+immediately extend the map using any ggplot2 syntax you already know. Want to
+add a title? Use `labs()`. Want to change the background colour? Use `theme()`.
+Want to add a second layer of points or polygons? Just use `+`.
+
+```{r}
+#| label: fig-first-map-titled
+#| fig-cap: "The same map with a title and caption added using standard ggplot2 labs()."
+mw_map() +
+  labs(
+    title = "Malawi Administrative Districts",
+    caption = "Source: MASDAP / Department of Surveys"
+  )
+```
+
+## Understanding administrative levels
+
+Malawi's administrative geography has four nested levels. mwmap bundles data
+for all four, and you switch between them using the `level` argument in
+`mw_map()`.
+
+- **Level 0** is the national boundary — useful as a reference outline or
+  backdrop behind other data.
+- **Level 1** shows the three regions: Northern, Central, and Southern.
+  Regional comparisons — vaccination coverage, food security — are a natural
+  fit for this level.
+- **Level 2** is the default and the most commonly used level. Malawi's 28
+  districts are the primary unit for government statistics, health surveillance,
+  and most national surveys.
+- **Level 3** shows Traditional Authorities, the sub-district units governed
+  by traditional leaders. This is the finest grain available in the package and
+  is useful for local-level planning and community health work.
+
+```{r}
+#| label: fig-levels
+#| fig-cap: "All four administrative levels available in mwmap. Level 2 (districts) is the default."
+#| layout-ncol: 2
+mw_map(level = 0) + labs(title = "Level 0 — National boundary")
+mw_map(level = 1) + labs(title = "Level 1 — Three regions")
+mw_map(level = 2) + labs(title = "Level 2 — 28 districts (default)")
+mw_map(level = 3) + labs(title = "Level 3 — Traditional Authorities")
+```
+
+Notice how level 3 is considerably more detailed. Because Traditional Authority
+boundaries are complex, rendering the full level-3 map is slower than the other
+levels. If you only need a subset of TAs — for example, those in a single
+district — use `mw_ta_map(districts = "Lilongwe")` rather than
+`mw_map(level = 3)` to keep rendering fast.
+
+## Filtering to a region or set of districts
+
+You will often want to focus on a subset of the country rather than mapping
+everything at once. mwmap gives you two built-in filters:
+
+- `region` accepts the full region name (`"Northern"`, `"Central"`,
+  `"Southern"`) or a single-letter shortcut (`"n"`, `"c"`, `"s"`).
+- `districts` accepts a character vector of district names. Matching is
+  case-insensitive.
+
+When you filter to a region, `mw_map()` automatically crops the bounding box
+so the selected area fills the plot. You do not need to adjust any axis limits
+manually.
+
+```{r}
+#| label: fig-filter
+#| fig-cap: "Filtering to a single region (left) or a custom set of districts (right)."
+#| layout-ncol: 2
+
+# Shortcut "s" is equivalent to "Southern"
+mw_map(region = "s") +
+  labs(title = "Southern Region")
+
+# Show Lilongwe and its neighbouring districts
+mw_map(districts = c("Lilongwe", "Dowa", "Dedza", "Ntcheu", "Mchinji")) +
+  labs(title = "Lilongwe and Neighbouring Districts")
+```
+
+---
+
+# The Core Mapping Functions
+
+## `mw_map()` — the main workhorse {#sec-mw-map}
+
+`mw_map()` is the central function in the package. Nearly every workflow starts
+here. It is designed to be useful at both extremes — a single call with no
+arguments produces a clean outline, while a heavily parameterised call can
+produce a complete choropleth with highlights, labels, and lake overlay in one
+step.
+
+The table below covers the most important arguments. A complete reference is
+available via `?mw_map`.
+
+| Argument | Default | What it does |
+|---|---|---|
+| `level` | `2` | Administrative level: 0 = country, 1 = regions, 2 = districts, 3 = TAs |
+| `data` | `NULL` | A data frame or sf object with values to display |
+| `fill` | `NULL` | Column name (as a string) to use for choropleth fill colour |
+| `fill_color` | `"#f0f0f0"` | Solid fill colour when no `fill` column is provided |
+| `lakes` | `FALSE` | Whether to overlay the three major lakes |
+| `lake_color` | `"#9ecae1"` | Fill colour for lakes |
+| `borders` | `TRUE` | Whether to draw polygon borders |
+| `border_color` | `"#333333"` | Border colour |
+| `border_size` | `0.3` | Border line width |
+| `region` | `NULL` | Restrict map to one region |
+| `districts` | `NULL` | Restrict map to named districts |
+| `label_districts` | `FALSE` | Add district name labels at centroids |
+| `label_size` | `3` | Size of district labels |
+| `highlight_districts` | `NULL` | Districts to draw with a bold coloured border |
+| `highlight_border_color` | `"#E41A1C"` | Colour of the highlight border |
+| `highlight_fill` | `NA` | Fill colour for highlighted districts (NA = transparent) |
+| `interactive` | `FALSE` | Return a plotly interactive map instead of ggplot2 |
+| `title`, `subtitle`, `caption` | `NULL` | Map text elements |
+
+: Key `mw_map()` arguments {tbl-colwidths="[28,18,54]"}
+
+### Adding the major lakes
+
+Malawi is defined by water as much as by its land. Lake Malawi covers roughly
+a fifth of the country's total area, and Lakes Malombe and Chilwa are
+significant features in the south. For most maps, adding the lakes makes the
+geography immediately recognisable to a Malawian audience and gives the reader
+an important spatial reference point.
+
+Set `lakes = TRUE` to overlay them. You can adjust the fill colour with
+`lake_color` and the border with `lake_border_color`.
+
+```{r}
+#| label: fig-lakes
+#| fig-cap: "District map with major lakes overlaid. The lakes are stored as a separate sf dataset (major_lakes) and drawn on top of the district polygons."
+mw_map(
+  lakes = TRUE,
+  lake_color = "#6BAED6",
+  lake_border_color = "#3182BD"
+) +
+  labs(title = "Malawi — Districts and Major Lakes")
+```
+
+### Highlighting specific districts
+
+`mw_map()` has built-in support for drawing attention to specific districts
+without needing a separate `mw_highlight()` layer. Use `highlight_districts`
+to name the districts you want to emphasise.
+
+By default, the highlight draws a bold red border around the named districts.
+You can customise the border colour, border width, and fill colour. Setting
+`highlight_fill = NA` (the default) makes the fill transparent — only the bold
+border draws attention while the underlying fill colour remains visible.
+
+```{r}
+#| label: fig-highlight-inline
+#| fig-cap: "Three major urban districts highlighted with a bold coloured border and a light orange fill."
+mw_map(
+  highlight_districts = c("Lilongwe", "Blantyre", "Mzimba"),
+  highlight_border_color = "#E41A1C",
+  highlight_border_size = 1.5,
+  highlight_fill = "#FEEDDE"
+) +
+  labs(
+    title = "Major Urban Districts",
+    caption = "Highlighted: Lilongwe, Blantyre, Mzimba"
+  )
+```
+
+### Adding district name labels
+
+Set `label_districts = TRUE` to add each district name at the centroid of its
+polygon. Labels that would overlap are automatically suppressed. For finer
+control — labelling only specific districts, changing the font, or using
+ggrepel for non-overlapping placement — use the standalone `mw_labels()`
+function described in @sec-labels.
+
+```{r}
+#| label: fig-labels-inline
+#| fig-cap: "All 28 district names added via label_districts = TRUE."
+mw_map(
+  fill_color = "#f7f7f7",
+  border_color = "grey60",
+  label_districts = TRUE,
+  label_size = 2.5,
+  label_color = "#333333"
+) +
+  labs(title = "Malawi District Names")
+```
+
+---
+
+## `mw_regions()` — regional overview {#sec-mw-regions}
+
+`mw_regions()` is a convenience function that aggregates the 28 district
+polygons into the three administrative regions and plots them. Internally it
+calls `dplyr::group_by()` and `sf::st_union()` to dissolve district boundaries,
+so you do not need to pre-process the data yourself.
+
+Use this function when your analysis is at the regional level — comparing
+Northern, Central, and Southern on some indicator — or when you need a clean
+regional overview to orient the reader at the start of a report.
+
+The `region_colors` argument accepts a named vector where the names are
+`"Northern"`, `"Central"`, and `"Southern"`. This makes it straightforward to
+encode data values as fill colours by pre-computing the colour for each region
+and passing the result in.
+
+```{r}
+#| label: fig-regions
+#| fig-cap: "The three administrative regions with distinct colours, name labels, and the major lakes overlaid."
+mw_regions(
+  region_colors = c(
+    "Northern" = "#E41A1C",
+    "Central" = "#377EB8",
+    "Southern" = "#4DAF4A"
+  ),
+  labels = TRUE,
+  label_size = 5,
+  label_color = "white",
+  label_face = "bold",
+  lakes = TRUE
+) +
+  labs(title = "Administrative Regions of Malawi")
+```
+
+Notice that `labels = TRUE` places each region name at the geometric centroid
+of the dissolved polygon. For the Southern Region — which wraps around Lake
+Malawi — the centroid may not look perfectly centred visually, but it is the
+mathematical centre of the polygon.
+
+---
+
+## `mw_ta_map()` — traditional authorities {#sec-mw-ta-map}
+
+Traditional Authorities (TAs) are the sub-district administrative units in
+Malawi, each governed by a customary chief. The package includes boundaries for
+approximately 250 TAs sourced from MASDAP. `mw_ta_map()` is a dedicated
+function for rendering these boundaries, with several features designed for
+working at this fine scale.
+
+The most important argument is `districts`. Rendering all 250 TAs at once is
+slow and the resulting map is very dense. It is almost always better to filter
+to the district or districts you care about. When you do, `mw_ta_map()` also
+draws the district boundary on top of the TA polygons by default
+(`district_border = TRUE`), which helps the reader understand where the
+selected TAs sit within the broader geography.
+
+```{r}
+#| label: fig-ta-all
+#| fig-cap: "All Traditional Authorities. Thin grey lines are TA boundaries; thicker red lines are district boundaries drawn on top."
+mw_ta_map(
+  border_color = "grey70",
+  border_size = 0.15,
+  district_border = TRUE,
+  district_border_color = "#E41A1C",
+  district_border_size = 0.6
+) +
+  labs(
+    title = "Traditional Authorities of Malawi",
+    caption = "Thin grey = TA boundaries · Thick red = district boundaries"
+  )
+```
+
+Filtering to specific districts dramatically improves readability and speed.
+
+```{r}
+#| label: fig-ta-filter
+#| fig-cap: "TAs in just two districts. Filtering with the districts argument makes the map much more readable and faster to render."
+mw_ta_map(
+  districts = c("Lilongwe", "Dowa"),
+  labels = TRUE,
+  label_size = 2,
+  label_color = "#333333",
+  district_border_color = "black",
+  district_border_size = 0.9
+) +
+  labs(title = "Traditional Authorities — Lilongwe and Dowa")
+```
+
+::: {.callout-tip}
+## `mw_ta_map()` vs `mw_map(level = 3)`
+
+Both produce TA-level maps but are designed for different situations.
+Use `mw_map(level = 3)` when you want to layer TA boundaries on top of
+other `mw_map()` features like fill data, highlights, or points. Use
+`mw_ta_map()` when you want the dedicated district-border overlay and the
+`districts` filter, which are specific to this function.
+:::
+
+---
+
+# Choropleth Mapping
+
+A choropleth map uses colour to encode a quantitative or categorical variable,
+with each polygon coloured according to its value. This is by far the most
+common type of thematic map in research and reporting — malaria incidence by
+district, poverty rates by region, vaccination coverage by TA.
+
+mwmap gives you two workflows for choropleth mapping: a **quick one-step
+route** via `mw_choropleth()`, and a **flexible two-step route** via
+`mw_join()` + `mw_map()`. Both produce the same kind of output; the choice
+depends on how much control you need over the final appearance.
+
+## Quick route — `mw_choropleth()` {#sec-choropleth}
+
+`mw_choropleth()` is designed for speed. You pass it a data frame, the name of
+the column you want to map (unquoted, like a tidyverse verb), and optionally a
+palette name. It handles the join, the scale, and the plot in a single call.
+
+The key arguments are:
+
+- `data` — your data frame. It must contain a column of district names.
+- `value` — the column to map, passed **unquoted** (e.g. `malaria_cases`,
+  not `"malaria_cases"`).
+- `district_col` — the name of the district name column in your data. Defaults
+  to `"district"`.
+- `palette` — one of the 25 named mwmap palettes. Defaults to `"health"`.
+- `scale_type` — `"auto"` (the default) detects whether your variable is
+  numeric (continuous scale) or a factor (discrete scale).
+- `lakes` — whether to overlay major lakes.
+- `title`, `subtitle`, `caption` — text elements for the map.
+
+To demonstrate, we will use a simulated dataset of malaria indicators for all
+28 districts. This same dataset is reused throughout the rest of this guide.
+
+```{r}
+#| label: health-data
+# Reading simulated district-level health data for all 28 districts
+
+health_data <- read_csv("Malaria_data.csv")
+
+head(health_data)
+
+```
+
+```{r}
+#| label: fig-choropleth-basic
+#| fig-cap: "A basic choropleth of malaria case counts. Note how Lilongwe and Blantyre dominate simply because they have the largest populations — not necessarily the highest risk."
+mw_choropleth(
+  health_data,
+  malaria_cases,
+  palette = "malaria",
+  title = "Reported Malaria Cases by District",
+  subtitle = "Simulated data for illustration",
+  caption = "Source: Simulated · mwmap package"
+)
+```
+
+### Why you should map rates, not raw counts
+
+The map above shows Lilongwe and Blantyre with the highest case counts. But
+those are also Malawi's two most populous districts — of course they have more
+cases. This is a classic pitfall in choropleth mapping. A map of raw counts
+often tells you more about population distribution than about the phenomenon
+you are trying to understand.
+
+The solution is to compute a **rate** — dividing the count by the population
+to put all districts on a comparable footing. A rate per 1,000 population is a
+standard epidemiological measure.
+
+```{r}
+#| label: fig-choropleth-rate
+#| fig-cap: "The same data expressed as a rate per 1,000 population. The geographic pattern is now very different — smaller, more rural districts may show higher burden than the urban centres."
+health_data$rate_per_1000 <- round(
+  health_data$malaria_cases / health_data$population * 1000,
+  1
+)
+
+mw_choropleth(
+  health_data,
+  rate_per_1000,
+  palette = "malaria",
+  title = "Malaria Incidence Rate by District",
+  subtitle = "Cases per 1,000 population · Simulated data",
+  legend_title = "Rate per 1,000",
+  caption = "Source: Simulated · mwmap package",
+  n_breaks = 5
+)
+```
+
+Comparing these two maps is instructive. The count map is dominated by the two
+big cities; the rate map may look completely different, revealing high-burden
+districts that were invisible in the count map.
+
+### Categorical (discrete) choropleths
+
+Not all variables are continuous numbers. Sometimes you want to map a category —
+risk tier, intervention group, funding status. When your variable is a
+**factor**, `mw_choropleth()` detects this automatically and switches to a
+discrete colour scale. We use `cut()` with `ordered_result = TRUE` to create
+an ordered factor, which tells the colour scale to arrange the legend from
+low to high.
+
+```{r}
+#| label: fig-choropleth-cat
+#| fig-cap: "A categorical choropleth. mw_choropleth() detects the factor variable automatically and uses a discrete scale."
+health_data$risk_tier <- cut(
+  health_data$rate_per_1000,
+  breaks = c(0, 4, 7, 10, 15, Inf),
+  labels = c("Very Low", "Low", "Medium", "High", "Very High"),
+  right = TRUE
+)
+
+mw_choropleth(
+  health_data,
+  risk_tier,
+  palette = "health",
+  title = "Malaria Risk Tier by District",
+  legend_title = "Risk Level",
+  caption = "Source: Simulated · mwmap package"
+)
+```
+
+---
+
+## Flexible route — `mw_join()` + `mw_map()` {#sec-join}
+
+When you need more control than `mw_choropleth()` offers — a custom scale,
+additional layers, multiple fills — the two-step approach gives you full
+flexibility. The idea is simple:
+
+1. **Join** your data to the map geometry using `mw_join()`, producing an `sf`
+   object where every district row is enriched with your data columns.
+2. **Plot** that joined `sf` object using `mw_map(data = ..., fill = ...)`.
+
+Because the result of step 1 is an `sf` object, you can then add any ggplot2
+scales, `mw_highlight()` layers, `mw_points()` layers, or custom themes.
+
+```{r}
+#| label: fig-join-workflow
+#| fig-cap: "The two-step mw_join() + mw_map() workflow. Joining first gives you full control over scales and additional layers."
+
+# Step 1: join your data frame to the district polygons
+joined <- mw_join(
+  data = health_data,
+  district_col = "district",
+  quiet = TRUE
+)
+
+# Step 2: pass the joined sf object to mw_map()
+mw_map(
+  data = joined,
+  fill = "rate_per_1000",
+  lakes = TRUE,
+  border_color = "white",
+  border_size = 0.4,
+  title = "Malaria Incidence Rate",
+  subtitle = "Cases per 1,000 population"
+) +
+  scale_fill_mw(
+    palette = "malaria",
+    name = "Rate per 1,000",
+    na.value = "grey80"
+  )
+```
+
+### How `mw_join()` works
+
+`mw_join()` is more than a simple merge. Under the hood it does several things
+that make it far more robust than calling `dplyr::left_join()` directly:
+
+**Name standardisation.** Before attempting to match, `mw_join()` passes all
+district names through `mw_clean_names()` automatically. This normalises
+capitalisation, removes trailing words like "District" or "TA", and fixes known
+variants (for example, "Nkhata Bay" becomes "Nkhatabay" to match the shapefile).
+Most of the time your data will join cleanly without any pre-processing.
+
+**A matching report.** By default (`verbose = TRUE`), `mw_join()` prints a
+summary showing how many of your districts matched the shapefile, which ones
+did not match, and — for the unmatched ones — a list of suggested alternatives
+based on string similarity. This is invaluable for catching typos early.
+
+**A left join by default.** `mw_join()` keeps all 28 district rows from the
+shapefile regardless of whether your data has a value for that district
+(`keep_all = TRUE`). Districts with no data appear grey on the map. This
+prevents the common mistake of accidentally hiding districts with missing data.
+
+```{r}
+#| label: join-report
+# Run mw_join() without quiet = TRUE to see the matching report.
+# This is especially useful when working with a new dataset for the first time.
+joined_verbose <- mw_join(
+  data.frame(
+    district = c("lilongwe", "BLANTYRE", "Mzimba", "Zomba City"),
+    value = c(120, 200, 85, 60)
+  ),
+  district_col = "district"
+)
+# mw_join() will tell you that "Zomba City" did not match and suggest "Zomba"
+```
+
+---
+
+# Adding Map Layers
+
+One of the strengths of the mwmap + ggplot2 approach is that maps are
+**composable**. You build a base map and then stack layers on top using `+`.
+This section covers the main layer functions.
+
+## `mw_highlight()` — draw attention to districts {#sec-highlight}
+
+`mw_highlight()` overlays a coloured fill or bold outline on specific districts.
+It is useful whenever you want to direct the reader's eye to particular areas —
+the districts covered by a programme, the ones that exceed a threshold, the
+capital and major cities.
+
+The key arguments are:
+
+- `districts` — district names to highlight (case-insensitive).
+- `fill` — the fill colour. Defaults to `"red"`.
+- `color` — the border colour. Defaults to `"black"`.
+- `alpha` — fill transparency, from 0 (invisible) to 1 (opaque).
+- `size` — border line width.
+- `outline_only` — if `TRUE`, suppresses the fill and draws only the border.
+  Ideal for adding emphasis on top of a choropleth without obscuring data values.
+- `label` — if `TRUE`, adds district name labels inside highlighted areas.
+
+```{r}
+#| label: fig-highlight
+#| fig-cap: "Three lakeshore districts highlighted with a gold fill. The highlight layer sits on top of the base map and is styled independently."
+mw_map(fill_color = "#f0f0f0", border_color = "grey70") +
+  mw_highlight(
+    districts = c("Salima", "Nkhotakota", "Mangochi"),
+    fill = "#FEC44F",
+    color = "#E6550D",
+    alpha = 0.85,
+    size = 0.8
+  ) +
+  labs(
+    title = "Lakeshore Districts of Malawi",
+    subtitle = "Salima · Nkhotakota · Mangochi"
+  )
+```
+
+### Using `outline_only = TRUE` on a choropleth
+
+When you have a choropleth showing continuous values, a solid fill highlight
+would cover the data. The `outline_only` option draws just the border, adding
+visual emphasis without obscuring the underlying colours.
+
+```{r}
+#| label: fig-highlight-outline
+#| fig-cap: "A bold outline highlight layered on top of a choropleth. The fill values remain fully visible."
+mw_choropleth(health_data, rate_per_1000, palette = "health", quiet = TRUE) +
+  mw_highlight(
+    districts = c("Lilongwe", "Blantyre"),
+    outline_only = TRUE,
+    color = "#E41A1C",
+    size = 1.2
+  ) +
+  labs(caption = "Red outline = major urban centres")
+```
+
+## `mw_highlight_multi()` — a different colour per district
+
+When you want to highlight several districts but give each one a distinct
+colour — to show which programme operates in each area, or to indicate
+different intervention types — `mw_highlight_multi()` accepts a **named
+vector** where the names are district names and the values are colours.
+
+```{r}
+#| label: fig-highlight-multi
+#| fig-cap: "Each highlighted district has its own colour, defined by a named character vector."
+mw_map(fill_color = "#f7f7f7", border_color = "grey70") +
+  mw_highlight_multi(
+    c(
+      "Lilongwe" = "#377EB8",
+      "Blantyre" = "#E41A1C",
+      "Mzuzu City" = "#4DAF4A",
+      "Zomba" = "#FF7F00"
+    ),
+    alpha = 0.8
+  ) +
+  labs(title = "Major Cities of Malawi")
+```
+
+---
+
+## `mw_points()` — plot geographic locations {#sec-points}
+
+`mw_points()` adds a layer of points to a map from a data frame containing
+longitude and latitude columns. Common uses include health facility locations,
+survey cluster coordinates, school or market sites, and infrastructure.
+
+The `lon` and `lat` arguments are passed **unquoted** — like a tidyverse verb.
+The function converts the data frame to an `sf` object internally and uses
+`geom_sf()` so the coordinate system integrates correctly with the base map.
+
+Important: when mapping a column to `color` or `size`, pass the **column name
+as a quoted string** — e.g. `color = "facility_type"`, not `color = facility_type`.
+This is different from how `mw_choropleth()` works (which uses unquoted names),
+because `mw_points()` needs to handle both fixed values (e.g. `color = "red"`)
+and column names in the same argument.
+
+```{r}
+#| label: facilities-data
+# Sample health facility data
+facilities <- data.frame(
+  name = c(
+    "Kamuzu Central", "Queen Elizabeth Central", "Mzuzu Central","Zomba Central",
+    "Dedza District", "Salima District", "Karonga District", "Mangochi District"),
+  lon = c(33.780, 35.002, 34.018, 35.320, 34.339, 34.459, 33.930, 35.264),
+  lat = c(-13.978, -15.785, -11.462, -15.380, -14.381, -13.782, -9.932, -14.477),
+  level = c(
+    "Central", "Central", "Central", "Central", "District", "District", "District", "District" ),
+  beds = c(1200, 1350, 600, 450, 180, 160, 200, 210)
+)
+```
+
+```{r}
+#| label: fig-points-basic
+#| fig-cap: "Health facilities plotted as red triangles on a district base map."
+mw_map(fill_color = "#f5f5f5", border_color = "grey60", lakes = TRUE) +
+  mw_points(
+    facilities,
+    lon,
+    lat,
+    color = "#E41A1C",
+    size = 3,
+    shape = 17 # 17 = filled triangle; 19 = filled circle
+  ) +
+  labs(
+    title = "Central Referral and District Hospitals",
+    caption = "Source: Ministry of Health, Malawi (simulated)"
+  )
+```
+
+### Mapping point attributes to aesthetics
+
+Pass a **quoted column name** to `color` or `size` to map a data attribute to
+a visual property. Then add a standard ggplot2 `scale_color_manual()` or
+`scale_size_continuous()` to control the exact colours and sizes used.
+
+```{r}
+#| label: fig-points-aes
+#| fig-cap: "Facility level mapped to point colour. Central hospitals are shown in red, district hospitals in blue."
+mw_map(fill_color = "#f0f4f8", border_color = "grey70", lakes = TRUE) +
+  mw_points(
+    facilities,
+    lon,
+    lat,
+    color = "level", # quoted column name
+    size = 3,
+    alpha = 0.9
+  ) +
+  scale_color_manual(
+    values = c("Central" = "#E41A1C", "District" = "#1a5a9a"),
+    name = "Facility Level"
+  ) +
+  labs(
+    title = "Health Facilities by Level",
+    subtitle = "Central and district hospitals"
+  )
+```
+
+### Labelling points
+
+Set `label = TRUE` and provide the column name as a string to `label_column`
+to add text labels next to each point. Labels are automatically suppressed when
+they would overlap. For repelled, non-overlapping labels, use
+`repel_labels = TRUE` (requires the `ggrepel` package).
+
+```{r}
+#| label: fig-points-labels
+#| fig-cap: "Central hospitals with name labels attached at point coordinates."
+hospitals <- facilities[facilities$level == "Central", ]
+
+mw_map(fill_color = "#f5f5f5", border_color = "grey70") +
+  mw_points(
+    hospitals,
+    lon,
+    lat,
+    color = "#1a5a9a",
+    size = 3,
+    label = TRUE,
+    label_column = "name", # column name as a quoted string
+    label_size = 2.8,
+    label_color = "#333333"
+  ) +
+  labs(title = "Central Hospitals — Malawi")
+```
+
+---
+
+## `mw_labels()` — district name labels {#sec-labels}
+
+`mw_labels()` adds district name text at the centroid of each polygon. It is
+the standalone version of the `label_districts = TRUE` argument in `mw_map()`
+and gives you more control: you can restrict labels to a subset of districts,
+change the font, and pass any additional arguments through to `geom_sf_text()`.
+
+The most useful arguments are:
+
+- `districts` — a character vector of district names to label. If `NULL`
+  (default), all districts are labelled.
+- `size` — text size. The default of 3 works well for a full-country map.
+- `color` — text colour.
+- `fontface` — `"plain"`, `"bold"`, `"italic"`, or `"bold.italic"`.
+- `label_column` — column to use for the label text. Defaults to `"ADM2_EN"`.
+
+```{r}
+#| label: fig-labels
+#| fig-cap: "All 28 districts labelled at their centroids."
+mw_map(fill_color = "#EDF8E9", border_color = "grey60") +
+  mw_labels(
+    size = 2.5,
+    color = "#1a3a5c",
+    fontface = "bold"
+  ) +
+  labs(title = "Malawi — All Districts Labelled")
+```
+
+A common pattern is to use `mw_labels()` to label only the specific districts
+you have highlighted, rather than all 28. This keeps the map clean while still
+giving the reader the names they need.
+
+```{r}
+#| label: fig-labels-selected
+#| fig-cap: "Labels only on the four highlighted cities. Restricting labels to highlighted districts avoids clutter."
+mw_map(
+  highlight_districts = c("Lilongwe", "Blantyre", "Mzuzu City", "Zomba"),
+  highlight_fill = "#FEEDDE",
+  highlight_border_color = "#E6550D",
+  fill_color = "#f7f7f7",
+  border_color = "grey70"
+) +
+  mw_labels(
+    districts = c("Lilongwe", "Blantyre", "Mzuzu City", "Zomba"),
+    size = 3.5,
+    color = "#E6550D",
+    fontface = "bold"
+  ) +
+  labs(title = "Major Cities of Malawi")
+```
+
+---
+
+# Colour Palettes
+
+Choosing colours for a choropleth map is more than an aesthetic decision. The
+colours need to encode the magnitude of the variable accurately — readers
+should be able to intuit that darker means more, or that a colour shift signals
+a meaningful boundary. The colours also need to work in print, on screen, and
+for readers with colour-vision deficiencies.
+
+mwmap ships 25 named palettes grouped into seven categories. Each palette is a
+vector of hex colour codes that has been verified to produce perceptually
+distinct and readable maps.
+
+## Browsing the available palettes
+
+`get_mw_palettes()` returns a data frame of all available palettes with their
+category, description, and number of colours. This is the quickest way to find
+the right palette for your subject matter — filter by `category` to narrow the
+list.
+
+```{r}
+#| label: tbl-palettes
+#| tbl-cap: "All 25 mwmap palettes organised by category."
+get_mw_palettes()
+```
+
+`view_mw_palettes()` displays all palettes as colour swatches in a ggplot2
+chart, which makes it easy to compare options visually before committing to one.
+
+```{r}
+#| label: fig-palette-view
+#| fig-cap: "All 25 mwmap palettes as colour swatches."
+#| fig-height: 9
+view_mw_palettes()
+```
+
+## Using `scale_fill_mw()` {#sec-scale}
+
+`scale_fill_mw()` is a ggplot2 scale function — drop it into any pipeline
+using `+`, just like `scale_fill_distiller()` or `scale_fill_viridis_c()`.
+
+The key arguments:
+
+- `palette` — the name of a palette from `get_mw_palettes()`. Default: `"health"`.
+- `discrete` — set `TRUE` for categorical data (factors). Default: `FALSE`
+  (continuous gradient).
+- `reverse` — `TRUE` flips the palette direction. Useful when the default
+  direction (light = low, dark = high) does not suit your variable.
+- `name` — the legend title.
+- `na.value` — colour for missing data. Defaults to `"grey50"`.
+
+```{r}
+#| label: fig-palette-examples
+#| fig-cap: "Three palettes applied to the same incidence rate data. The palette choice substantially changes the visual impression."
+#| layout-ncol: 3
+
+joined <- mw_join(health_data, quiet = TRUE)
+
+mw_map(data = joined, fill = "rate_per_1000") +
+  scale_fill_mw("health", name = "Rate") +
+  labs(title = '"health"')
+
+mw_map(data = joined, fill = "rate_per_1000") +
+  scale_fill_mw("malaria", name = "Rate") +
+  labs(title = '"malaria"')
+
+mw_map(data = joined, fill = "rate_per_1000") +
+  scale_fill_mw("poverty", name = "Rate") +
+  labs(title = '"poverty"')
+```
+
+### Reversing a palette
+
+Some variables make more intuitive sense when the colour direction is flipped.
+For example, a "coverage" metric where higher is better might read more
+naturally if the dark end of the palette represents high coverage (good) rather
+than the default where dark typically implies high risk or high burden.
+
+```{r}
+#| label: fig-palette-reverse
+#| fig-cap: "The malaria palette reversed. Now lighter colour = higher value."
+mw_map(data = joined, fill = "rate_per_1000") +
+  scale_fill_mw("malaria", reverse = TRUE, name = "Rate per 1,000") +
+  labs(title = "Reversed palette: dark = low, light = high")
+```
+
+### Extracting hex codes with `get_mw_palette()`
+
+You can extract the raw hex codes from any palette for use outside of ggplot2 —
+in tables, slide decks, custom charts, or base R plots. The `n` argument
+interpolates the palette to exactly `n` colours, which is useful when you need
+more or fewer colours than the palette's default length.
+
+```{r}
+#| label: palette-extract
+# All colours in the three-colour 'regions' palette
+get_mw_palette("regions")
+#> [1] "#E41A1C" "#377EB8" "#4DAF4A"
+
+# Interpolate to exactly 7 colours from the 'health' palette
+get_mw_palette("health", n = 7)
+
+# Reverse the malaria palette
+get_mw_palette("malaria", reverse = TRUE)
+```
+
+---
+
+# Layout and Styling {#sec-layout}
+
+A publication-ready map needs more than data and colour. It needs a descriptive
+title, an informative subtitle, a source citation in the caption, and a
+well-placed legend. `mw_layout()` is a convenience function that applies all of
+these in a single call with consistent typographic styling throughout.
+
+`mw_layout()` returns a special `mw_layout` class object. When you add it to a
+ggplot2 map using `+`, it applies both a `labs()` call (for the text elements)
+and a `theme()` call (for the visual formatting) — so you get both content and
+styling in one step.
+
+```{r}
+#| label: fig-layout
+#| fig-cap: "The same choropleth polished with mw_layout() for titles, legend placement, and typography."
+mw_choropleth(health_data, malaria_cases, palette = "malaria", quiet = TRUE) +
+  mw_layout(
+    title = "Malaria Cases by District",
+    subtitle = "Malawi · Simulated data · 2024",
+    caption = "Source: Ministry of Health · Visualisation: mwmap",
+    legend_position = "bottom",
+    legend_direction = "horizontal",
+    legend_title = "Reported Cases"
+  )
+```
+
+The most useful `mw_layout()` arguments:
+
+| Argument | Description |
+|---|---|
+| `title`, `subtitle`, `caption` | The three standard ggplot2 text elements |
+| `legend_position` | `"right"`, `"left"`, `"bottom"`, `"top"`, or `"none"` |
+| `legend_direction` | `"vertical"` (default) or `"horizontal"` — horizontal suits a bottom legend |
+| `theme` | Base ggplot2 theme: `"void"` (no axes, default), `"minimal"`, or `"classic"` |
+| `panel_border` | `TRUE` adds a thin rectangle around the map panel |
+| `background_color` | Plot background fill. Default: `"white"` |
+| `grid_major` | `TRUE` adds lat/lon grid lines |
+| `font_family` | Font family for all text |
+| `title_size` | Title font size. Default: 16 |
+| `caption_size` | Caption font size. Default: 9 |
+| `legend_key_size` | Size of each legend key in cm |
+
+: `mw_layout()` arguments {tbl-colwidths="[30,70]"}
+
+::: {.callout-tip}
+## Legend position for published figures
+For figures intended for journal publication or formal reports,
+`legend_position = "right"` (the default) is usually the best choice — it
+does not compress the map vertically. For slide decks or dashboards where
+space is at a premium, `"bottom"` with `legend_direction = "horizontal"`
+often works better.
+:::
+
+---
+
+# Working with District Names {#sec-names}
+
+District name matching is one of the most common sources of frustration when
+working with Malawi data. Administrative names appear differently across
+datasets — "Nkhata Bay" vs "Nkhatabay", "Blantyre City" vs "Blantyre", "Mzuzu"
+vs "Mzuzu City". The utilities in this section handle these variations
+automatically.
+
+## Listing district names with `mw_districts()`
+
+`mw_districts()` returns the official district names as they appear in the
+`mw_level_2` shapefile. Use this to build input validation lists, populate
+dropdown menus in Shiny apps, or simply check the exact spellings your data
+needs to match.
+
+```{r}
+#| label: districts-list
+# All 28 districts, sorted alphabetically
+mw_districts()
+
+# Only Southern region districts ("s" is a valid shortcut for "Southern")
+mw_districts("Southern")
+
+# Return a full data frame with standard, admin, and short name variants
+# plus the region each district belongs to
+mw_districts(type = "all")
+```
+
+The `type` argument controls the format of the output:
+
+- `"standard"` (default) — title-case names suitable for display in charts and maps.
+- `"admin"` — names exactly as they appear in the shapefile.
+- `"short"` — names with suffixes like "City" stripped.
+- `"all"` — a data frame with all three variants plus the region column.
+
+## Standardising names with `mw_clean_names()`
+
+`mw_clean_names()` applies a series of transformations to bring district name
+strings closer to the shapefile format:
+
+1. Converts to title case (`"lilongwe"` → `"Lilongwe"`)
+2. Strips trailing "District", "T/A", "TA" (`"Blantyre District"` → `"Blantyre"`)
+3. Normalises whitespace (collapses multiple spaces to one)
+4. Applies known shapefile variant mappings:
+   - `"Nkhata Bay"` → `"Nkhatabay"` (the shapefile omits the space)
+   - `"Mzuzu"` → `"Mzuzu City"` (common shorthand → full shapefile name)
+
+```{r}
+#| label: clean-names
+messy <- c("lilongwe", "BLANTYRE DISTRICT", "nkhata bay", "mzuzu", "zomba")
+mw_clean_names(messy)
+#> [1] "Lilongwe"   "Blantyre"   "Nkhatabay"  "Mzuzu City" "Zomba"
+```
+
+`mw_join()` calls `mw_clean_names()` on your district column automatically, so
+in normal use you never need to call this function yourself. But calling it
+explicitly before a join lets you inspect what the cleaning will do to your
+data before committing to the join.
+
+## Finding close matches with `mw_suggest_matches()`
+
+When `mw_join()` reports unmatched districts, `mw_suggest_matches()` helps you
+figure out the correct name. It uses Levenshtein edit distance to find the most
+similar names in the candidate list — the same algorithm used by autocorrect.
+The first suggestion is almost always the intended match when you have a simple
+typo.
+
+```{r}
+#| label: suggest-matches
+# A simple typo — one extra "e"
+mw_suggest_matches("Lilongwee", mw_districts())
+#> [1] "Lilongwe"  "Salima"   "Likoma"
+
+# Another typo
+mw_suggest_matches("Blantyree", mw_districts())
+#> [1] "Blantyre"  "Balaka"   "Salima"
+```
+
+::: {.callout-warning}
+## Two name variants to always watch for
+
+| What you might write | Correct shapefile name |
+|---|---|
+| `"Nkhata Bay"` | `"Nkhatabay"` |
+| `"Mzuzu"` | `"Mzuzu City"` |
+
+`mw_clean_names()` and `mw_join()` handle both automatically. But if you are
+writing district names directly as strings in `mw_highlight(districts = ...)` or
+`mw_labels(districts = ...)`, use the shapefile form (right column).
+Check the exact names with `mw_districts()`.
+:::
+
+---
+
+# Complete Worked Examples
+
+These examples bring together multiple mwmap functions to produce polished,
+multi-layer maps of the kind you might include in a research paper, government
+report, or programme dashboard.
+
+## Example 1 — Malaria burden map
+
+This example builds a complete publication-ready map that combines a
+categorical choropleth, lake overlay, outline highlights on the major cities,
+and text labels. The key insight is that each element is a separate layer added
+with `+`, and the final `mw_layout()` call applies consistent titling and
+styling to the whole figure.
+
+```{r}
+#| label: fig-example-health
+#| fig-cap: "A complete, multi-layer malaria burden map suitable for publication."
+#| fig-height: 7
+
+# Step 1: classify districts into burden tiers
+health_data$burden <- cut(
+  health_data$rate_per_1000,
+  breaks = c(0, 3, 5, 8, 12, Inf),
+  labels = c("Minimal", "Low", "Moderate", "High", "Critical"),
+  ordered_result = TRUE
+)
+
+# Step 2: join to geometry
+map_df <- mw_join(health_data, quiet = TRUE)
+
+# Step 3: build the map layer by layer
+mw_map(
+  data = map_df,
+  fill = "burden",
+  lakes = TRUE,
+  border_color = "white",
+  border_size = 0.4
+) +
+  scale_fill_mw(
+    "malaria",
+    discrete = TRUE,
+    name = "Burden Level",
+    na.value = "grey85"
+  ) +
+  mw_highlight(
+    districts = c("Blantyre", "Lilongwe"),
+    outline_only = TRUE,
+    color = "#333333",
+    size = 1
+  ) +
+  mw_labels(
+    districts = c("Blantyre", "Lilongwe", "Mzuzu City", "Zomba"),
+    size = 3,
+    color = "#333333"
+  ) +
+  mw_layout(
+    title = "Malaria Burden Classification by District",
+    subtitle = "Malawi · District Level · Simulated data · 2024",
+    caption = "Source: Simulated data · Visualisation: mwmap package",
+    legend_position = "right"
+  )
+```
+
+---
+
+## Example 2 — Regional vaccination coverage
+
+This example uses `mw_regions()` to show a regional-level indicator. The
+darker the green, the higher the vaccination coverage. We encode the coverage
+values by manually mapping each region to a colour from the `"vaccination"`
+palette — darker for higher coverage. The result communicates both geography
+and relative performance at a glance.
+
+```{r}
+#| label: fig-example-regions
+#| fig-cap: "Vaccination coverage at the regional level. Darker green = higher coverage."
+mw_regions(
+  region_colors = c(
+    "Northern" = "#31A354", # highest coverage → darkest green
+    "Central" = "#74C476",
+    "Southern" = "#C7E9C0" # lowest coverage → lightest green
+  ),
+  labels = TRUE,
+  label_size = 5,
+  label_face = "bold",
+  lakes = TRUE
+) +
+  mw_layout(
+    title = "Childhood Vaccination Coverage by Region",
+    subtitle = "Malawi · Simulated estimates · 2024",
+    caption = "Darker green = higher coverage · Source: Simulated"
+  )
+```
+
+---
+
+## Example 3 — Infrastructure overlaid on burden data
+
+This example combines two data sources on a single map: the district-level
+health burden (continuous choropleth) and the locations of health facilities
+(points coloured by facility level). This dual-layer approach allows the reader
+to see both the health burden and the distribution of health infrastructure
+simultaneously — and to immediately spot areas where burden is high but
+facilities are sparse.
+
+```{r}
+#| label: fig-example-infra
+#| fig-cap: "Health burden choropleth with facility locations overlaid. High-burden areas with few facilities become immediately visible."
+#| fig-height: 7
+
+mw_map(
+  data = map_df,
+  fill = "rate_per_1000",
+  lakes = TRUE,
+  border_color = "white",
+  border_size = 0.3
+) +
+  scale_fill_mw(
+    "health",
+    name = "Rate per 1,000",
+    na.value = "grey85"
+  ) +
+  mw_points(
+    facilities,
+    lon,
+    lat,
+    color = "level",
+    size = 3,
+    alpha = 0.9
+  ) +
+  scale_color_manual(
+    values = c("Central" = "#E41A1C", "District" = "#1a5a9a"),
+    name = "Facility Level"
+  ) +
+  mw_layout(
+    title = "Health Facilities and Malaria Burden",
+    subtitle = "Malawi · 2024 · Simulated data",
+    caption = "Blue = district hospitals · Red = central referral hospitals",
+    legend_position = "right"
+  )
+```
+
+---
+
+## Example 4 — Traditional authority detail
+
+This example zooms into a single district (Lilongwe) to show the TA-level
+structure. This kind of map is useful for district health offices, local
+programme teams, and field research that needs to operate at the sub-district
+level. The thick district boundary provides a frame of reference; the TA name
+labels let the reader identify each sub-unit by name.
+
+```{r}
+#| label: fig-example-ta
+#| fig-cap: "Traditional Authorities in Lilongwe district. The thick red border is the district boundary; thin grey lines are TA boundaries."
+mw_ta_map(
+  districts = "Lilongwe",
+  fill = "white",
+  border_color = "grey80",
+  border_size = 0.2,
+  district_border = TRUE,
+  district_border_color = "#E41A1C",
+  district_border_size = 1.2,
+  labels = TRUE,
+  label_size = 2.2,
+  label_color = "#333333"
+) +
+  mw_layout(
+    title = "Traditional Authorities — Lilongwe District",
+    caption = "Source: MASDAP · mwmap package"
+  )
+```
+
+---
+
+# Tips and Best Practices {#sec-tips}
+
+::: {.callout-tip}
+## Always map rates, not raw counts
+
+A map of raw case counts is almost always misleading because it reflects
+population size as much as the variable of interest. Lilongwe and Blantyre
+will have more of almost everything simply because they are the largest
+districts. Before mapping any count variable, divide by the appropriate
+denominator:
+
+```r
+# Incidence rate per 1,000 population
+data$rate_per_1000 <- data$cases / data$population * 1000
+
+# Percentage of target reached
+data$coverage_pct <- data$reached / data$target * 100
+```
+
+The geographic pattern on a rate map is often dramatically different from a
+count map and reveals the underlying epidemiology or social geography in a way
+that counts simply cannot.
+:::
+
+::: {.callout-tip}
+## Build complex maps layer by layer
+
+Rather than trying to pass every option to a single function call, build your
+map incrementally and check the output at each step. This makes it far easier
+to debug problems — if something looks wrong, print the map after each `+` to
+find which layer is causing the issue:
+
+```r
+p <- mw_map(data = joined, fill = "rate")
+p <- p + scale_fill_mw("malaria", name = "Rate")
+p <- p + mw_highlight(c("Lilongwe", "Blantyre"), outline_only = TRUE)
+p <- p + mw_labels(districts = c("Lilongwe", "Blantyre"))
+p <- p + mw_layout(title = "My Map", caption = "Source: ...")
+p
+```
+:::
+
+::: {.callout-tip}
+## Use `quiet = TRUE` in R Markdown and Quarto documents
+
+Several mwmap functions print informational messages to the console by default.
+These messages are helpful interactively but clutter rendered documents.
+Suppress them with `quiet = TRUE`:
+
+```r
+joined <- mw_join(my_data, quiet = TRUE)
+mw_choropleth(my_data, my_variable, quiet = TRUE)
+```
+
+Alternatively, set `message: false` in the Quarto chunk options to suppress
+messages globally for all chunks in the document.
+:::
+
+::: {.callout-tip}
+## Combine with ggplot2 extension packages
+
+Because `mw_map()` returns a plain ggplot2 object, any ggplot2 extension
+package works on top of it without modification:
+
+- **`patchwork`** — arrange multiple maps side by side or in a grid.
+- **`ggspatial`** — add scale bars and north arrows (also available via
+  `scale_bar = TRUE` and `north_arrow = TRUE` in `mw_map()`).
+- **`ggrepel`** — non-overlapping labels via `mw_label_repel()`.
+- **`plotly`** — interactive maps via `interactive = TRUE` in `mw_map()` or
+  `mw_choropleth()`.
+:::
+
+::: {.callout-note}
+## Interactive maps with plotly
+
+Pass `interactive = TRUE` to `mw_map()` or `mw_choropleth()` to get a
+pannable, zoomable map in HTML documents and Shiny apps:
+
+```r
+# Requires: install.packages("plotly")
+mw_choropleth(
+  health_data,
+  rate_per_1000,
+  palette     = "malaria",
+  title       = "Malaria Incidence Rate",
+  interactive = TRUE
+)
+```
+
+Note that `mw_layout()` and other ggplot2 layer functions cannot be added to a
+plotly object with `+`. Apply all ggplot2 modifications before converting to
+interactive, or call `plotly::ggplotly(your_ggplot_map)` yourself at the end.
+:::
+
+---
+
+# Function Reference Summary {#sec-reference}
+
+For full documentation on any function, including all arguments and additional
+examples, use R's built-in help: `?mw_map`, `?mw_choropleth`, `?mw_join`, etc.
+
+| Function | What it does | Key arguments |
+|---|---|---|
+| `mw_map()` | Main mapping function | `level`, `fill`, `lakes`, `region`, `districts`, `label_districts`, `highlight_districts` |
+| `mw_regions()` | Regional overview (three regions) | `fill`, `region_colors`, `labels`, `lakes` |
+| `mw_ta_map()` | Traditional Authority map | `districts`, `labels`, `district_border`, `fill_column` |
+| `mw_choropleth()` | One-step choropleth | `data`, `value`, `district_col`, `palette`, `scale_type`, `n_breaks` |
+| `mw_join()` | Merge a data frame to district polygons | `data`, `district_col`, `map`, `keep_all`, `verbose` |
+| `mw_highlight()` | Coloured fill or outline on specific districts | `districts`, `fill`, `color`, `alpha`, `outline_only`, `label` |
+| `mw_highlight_multi()` | Different colour per district | Named vector of district → colour pairs |
+| `mw_points()` | Add point locations to a map | `data`, `lon`, `lat`, `color`, `size`, `shape`, `label`, `label_column` |
+| `mw_labels()` | District name text at centroids | `districts`, `size`, `color`, `fontface`, `label_column` |
+| `mw_label_repel()` | Non-overlapping labels (requires ggrepel) | `force`, `max.overlaps` |
+| `mw_layout()` | Titles, legend placement, and theme | `title`, `subtitle`, `caption`, `legend_position`, `legend_direction`, `theme`, `panel_border` |
+| `scale_fill_mw()` | Apply a named mwmap palette | `palette`, `discrete`, `reverse`, `direction`, `name`, `na.value` |
+| `get_mw_palette()` | Extract palette hex codes | `name`, `n`, `reverse`, `interpolate` |
+| `get_mw_palettes()` | Data frame of all palettes | `category` |
+| `view_mw_palettes()` | Swatch chart of all palettes | `n`, `ncol` |
+| `mw_districts()` | District names as a vector or data frame | `region`, `type`, `sorted`, `include_ta` |
+| `mw_districts_simple()` | Simple character vector of district names | `region` |
+| `mw_clean_names()` | Standardise district name strings | `x` |
+| `mw_suggest_matches()` | Find closest shapefile names by edit distance | `x`, `candidates`, `n` |
+
+: Complete mwmap function reference {tbl-colwidths="[24,41,35]"}
+
+---
+
+# Session Information {.appendix}
+
+The output below records the R version and package versions used when this
+document was produced. This information is useful for reproducing results and
+diagnosing version-related issues.
+
+```{r}
+#| label: session-info
+sessionInfo()
+```
+
+---
+
+::: {.callout-note appearance="minimal"}
+**mwmap** is developed and maintained by Chifundo Bita.
+Source code and issue tracker: [github.com/bitacanalytics/mwmap](https://github.com/bitacanalytics/mwmap)
+Install from CRAN: `install.packages("mwmap")`
+Install development version: `remotes::install_github("bitacanalytics/mwmap")`
+:::

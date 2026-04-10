@@ -1,0 +1,10 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "mwmap — A Guide to Mapping Malawi in R"
+
+format:
+  html:
+    theme: cosmo
